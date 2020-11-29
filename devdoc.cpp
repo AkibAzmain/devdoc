@@ -18,6 +18,9 @@ private:
     // An array of all root nodes created
     std::vector<const docview::doc_tree_node*> root_nodes;
 
+    // Array document roots of each root node
+    std::map<const docview::doc_tree_node*, Glib::ustring> doc_roots;
+
     // Builds an document tree from an chapter
     void build_chapters_tree(docview::doc_tree_node* node, xmlpp::Node* source)
     {
@@ -75,16 +78,34 @@ public:
     const docview::doc_tree_node* get_doc_tree(std::filesystem::path path) noexcept
     {
 
+        // Boolean to hold whether is path is valid
+        bool valid_path = false;
+
+        // Do some test to determine is the path valid
+        if (std::filesystem::is_regular_file(path))
+        {
+            if (path.extension() == ".devhelp" || path.extension() == ".devhelp2")
+            {
+                valid_path = true;
+            }
+        }
+        else if (std::filesystem::is_directory(path))
+        {
+            std::filesystem::path path_without_ext = path / path.filename();
+            if (std::filesystem::exists(std::string(path_without_ext) + ".devhelp"))
+            {
+                path = std::string(path_without_ext) + ".devhelp";
+                valid_path = true;
+            }
+            else if (std::filesystem::exists(std::string(path_without_ext) + ".devhelp2"))
+            {
+                path = std::string(path_without_ext) + ".devhelp2";
+                valid_path = true;
+            }
+        }
+
         // Make sure it's a valid path
-        if (
-            !std::filesystem::is_directory(path) ||
-            !std::filesystem::exists(
-                path / (std::string(path.filename()) + ".devhelp2")
-            ) ||
-            !std::filesystem::is_regular_file(
-                path / (std::string(path.filename()) + ".devhelp2")
-            )
-        )
+        if (!valid_path)
         {
             return nullptr;
         }
@@ -98,7 +119,7 @@ public:
             auto parser = parsers[parsers.size() - 1];
 
             // Parse the file
-            parser->parse_file(Glib::ustring(path / (std::string(path.filename()) + ".devhelp2")));
+            parser->parse_file(Glib::ustring(path));
 
             // Get the root element and check for validity, return nullptr on failure
             auto xml_root = parser->get_document()->get_root_node();
@@ -178,8 +199,20 @@ public:
                     root->children.push_back(parent);
             }
 
+            // Get the document root
+            Glib::ustring doc_root;
+            if (xml_root->get_attribute("base"))
+            {
+                doc_root = xml_root->get_attribute_value("base");
+            }
+            else
+            {
+                doc_root = std::string(path.parent_path());
+            }
+
             // Save it for further requests
             nodes.insert(std::make_pair(root, xml_root));
+            doc_roots.insert(std::make_pair(root, doc_root));
             root_nodes.push_back(root);
 
             // Return it
@@ -204,8 +237,7 @@ public:
 
         // Return the URI
         return std::make_pair(
-            "file://" + nodes[root]->get_attribute_value("base") +
-            "/" + nodes[node]->get_attribute_value("link"),
+            "file://" + doc_roots[root] + "/" + nodes[node]->get_attribute_value("link"),
             true
         );
     }
